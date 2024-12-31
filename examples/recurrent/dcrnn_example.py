@@ -11,7 +11,9 @@ from torch_geometric_temporal.nn.recurrent import DCRNN
 from torch_geometric_temporal.dataset import ChickenpoxDatasetLoader
 from torch_geometric_temporal.signal import temporal_signal_split
 
-loader = ChickenpoxDatasetLoader()
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+loader = ChickenpoxDatasetLoader("../../dataset")
 
 dataset = loader.get_dataset()
 
@@ -29,7 +31,7 @@ class RecurrentGCN(torch.nn.Module):
         h = self.linear(h)
         return h
         
-model = RecurrentGCN(node_features = 4)
+model = RecurrentGCN(node_features = 4).to(device)
 
 optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
@@ -38,6 +40,7 @@ model.train()
 for epoch in tqdm(range(200)):
     cost = 0
     for time, snapshot in enumerate(train_dataset):
+        snapshot = snapshot.to(device)
         y_hat = model(snapshot.x, snapshot.edge_index, snapshot.edge_attr)
         cost = cost + torch.mean((y_hat-snapshot.y)**2)
     cost = cost / (time+1)
@@ -48,6 +51,7 @@ for epoch in tqdm(range(200)):
 model.eval()
 cost = 0
 for time, snapshot in enumerate(test_dataset):
+    snapshot = snapshot.to(device)
     y_hat = model(snapshot.x, snapshot.edge_index, snapshot.edge_attr)
     cost = cost + torch.mean((y_hat-snapshot.y)**2)
 cost = cost / (time+1)

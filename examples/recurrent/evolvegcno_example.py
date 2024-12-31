@@ -11,7 +11,9 @@ from torch_geometric_temporal.nn.recurrent import EvolveGCNO
 from torch_geometric_temporal.dataset import ChickenpoxDatasetLoader
 from torch_geometric_temporal.signal import temporal_signal_split
 
-loader = ChickenpoxDatasetLoader()
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+loader = ChickenpoxDatasetLoader("../../dataset")
 
 dataset = loader.get_dataset()
 
@@ -22,14 +24,16 @@ class RecurrentGCN(torch.nn.Module):
         super(RecurrentGCN, self).__init__()
         self.recurrent = EvolveGCNO(node_features)
         self.linear = torch.nn.Linear(node_features, 1)
+        self.w = None
 
-    def forward(self, x, edge_index, edge_weight, w):
-        h, w = self.recurrent(x, edge_index, edge_weight, w)
+    def forward(self, x, edge_index, edge_weight):
+        h, self.w = self.recurrent(x, edge_index, edge_weight, self.w)
         h = F.relu(h)
         h = self.linear(h)
-        return h, w
+        self.w = self.w.detach()
+        return h
         
-model = RecurrentGCN(node_features = 4)
+model = RecurrentGCN(node_features = 4).to(device)
 for param in model.parameters():
     param.retain_grad()
 
@@ -39,9 +43,9 @@ model.train()
 
 for epoch in tqdm(range(200)):
     cost = 0
-    w = None
     for time, snapshot in enumerate(train_dataset):
-        y_hat, w = model(snapshot.x, snapshot.edge_index, snapshot.edge_attr, w)
+        snapshot = snapshot.to(device)
+        y_hat = model(snapshot.x, snapshot.edge_index, snapshot.edge_attr)
         cost = cost + torch.mean((y_hat-snapshot.y)**2)
     cost = cost / (time+1)
     cost.backward(retain_graph=True)
@@ -51,9 +55,8 @@ for epoch in tqdm(range(200)):
 model.eval()
 cost = 0
 for time, snapshot in enumerate(test_dataset):
-    if time == 0:
-        w = None
-    y_hat, w = model(snapshot.x, snapshot.edge_index, snapshot.edge_attr, w)
+    snapshot = snapshot.to(device)
+    y_hat = model(snapshot.x, snapshot.edge_index, snapshot.edge_attr)
     cost = cost + torch.mean((y_hat-snapshot.y)**2)
 cost = cost / (time+1)
 cost = cost.item()

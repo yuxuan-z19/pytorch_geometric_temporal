@@ -11,7 +11,9 @@ from torch_geometric_temporal.nn.recurrent import TGCN
 from torch_geometric_temporal.dataset import ChickenpoxDatasetLoader
 from torch_geometric_temporal.signal import temporal_signal_split
 
-loader = ChickenpoxDatasetLoader()
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+loader = ChickenpoxDatasetLoader("../../dataset")
 
 dataset = loader.get_dataset()
 
@@ -22,14 +24,16 @@ class RecurrentGCN(torch.nn.Module):
         super(RecurrentGCN, self).__init__()
         self.recurrent = TGCN(node_features, 32)
         self.linear = torch.nn.Linear(32, 1)
+        self.h = None
 
-    def forward(self, x, edge_index, edge_weight, prev_hidden_state):
-        h = self.recurrent(x, edge_index, edge_weight, prev_hidden_state)
-        y = F.relu(h)
+    def forward(self, x, edge_index, edge_weight):
+        self.h = self.recurrent(x, edge_index, edge_weight, self.h)
+        y = F.relu(self.h)
         y = self.linear(y)
-        return y, h
+        self.h = self.h.detach()
+        return y
         
-model = RecurrentGCN(node_features = 4)
+model = RecurrentGCN(node_features = 4).to(device)
 
 optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
@@ -37,9 +41,9 @@ model.train()
 
 for epoch in tqdm(range(50)):
     cost = 0
-    hidden_state = None
     for time, snapshot in enumerate(train_dataset):
-        y_hat, hidden_state = model(snapshot.x, snapshot.edge_index, snapshot.edge_attr,hidden_state)
+        snapshot = snapshot.to(device)
+        y_hat = model(snapshot.x, snapshot.edge_index, snapshot.edge_attr)
         cost = cost + torch.mean((y_hat-snapshot.y)**2)
     cost = cost / (time+1)
     cost.backward()
@@ -50,7 +54,8 @@ model.eval()
 cost = 0
 hidden_state = None
 for time, snapshot in enumerate(test_dataset):
-    y_hat, hidden_state = model(snapshot.x, snapshot.edge_index, snapshot.edge_attr, hidden_state)
+    snapshot = snapshot.to(device)
+    y_hat = model(snapshot.x, snapshot.edge_index, snapshot.edge_attr)
     cost = cost + torch.mean((y_hat-snapshot.y)**2)
 cost = cost / (time+1)
 cost = cost.item()

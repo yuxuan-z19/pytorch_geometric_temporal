@@ -11,7 +11,9 @@ from torch_geometric_temporal.nn.recurrent import GConvLSTM
 from torch_geometric_temporal.dataset import ChickenpoxDatasetLoader
 from torch_geometric_temporal.signal import temporal_signal_split
 
-loader = ChickenpoxDatasetLoader()
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+loader = ChickenpoxDatasetLoader("../../dataset")
 
 dataset = loader.get_dataset()
 
@@ -22,14 +24,18 @@ class RecurrentGCN(torch.nn.Module):
         super(RecurrentGCN, self).__init__()
         self.recurrent = GConvLSTM(node_features, 32, 1)
         self.linear = torch.nn.Linear(32, 1)
+        self.h = None
+        self.c = None
 
-    def forward(self, x, edge_index, edge_weight, h, c):
-        h_0, c_0 = self.recurrent(x, edge_index, edge_weight, h, c)
-        h = F.relu(h_0)
+    def forward(self, x, edge_index, edge_weight):
+        self.h, self.c = self.recurrent(x, edge_index, edge_weight, self.h, self.c)
+        h = F.relu(self.h)
         h = self.linear(h)
-        return h, h_0, c_0
+        self.h = self.h.detach()
+        self.c = self.c.detach()
+        return h
         
-model = RecurrentGCN(node_features=4)
+model = RecurrentGCN(node_features=4).to(device)
 
 optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
@@ -39,7 +45,8 @@ for epoch in tqdm(range(200)):
     cost = 0
     h, c = None, None
     for time, snapshot in enumerate(train_dataset):
-        y_hat, h, c = model(snapshot.x, snapshot.edge_index, snapshot.edge_attr, h, c)
+        snapshot = snapshot.to(device)
+        y_hat = model(snapshot.x, snapshot.edge_index, snapshot.edge_attr)
         cost = cost + torch.mean((y_hat-snapshot.y)**2)
     cost = cost / (time+1)
     cost.backward()
@@ -49,7 +56,8 @@ for epoch in tqdm(range(200)):
 model.eval()
 cost = 0
 for time, snapshot in enumerate(test_dataset):
-    y_hat, h, c = model(snapshot.x, snapshot.edge_index, snapshot.edge_attr, h, c)
+    snapshot = snapshot.to(device)
+    y_hat = model(snapshot.x, snapshot.edge_index, snapshot.edge_attr)
     cost = cost + torch.mean((y_hat-snapshot.y)**2)
 cost = cost / (time+1)
 cost = cost.item()
